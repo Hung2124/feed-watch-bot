@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>tag:example.org,2026:releases</id>
+  <title>Release notes from example/tool</title>
+  <updated>2026-10-08T10:00:00Z</updated>
+  <link rel="alternate" type="text/html" href="https://example.org/tool/releases"/>
+  <link rel="self" type="application/atom+xml" href="https://example.org/tool/releases.atom"/>
+  <entry>
+    <id>tag:example.org,2026:Release/3</id>
+    <updated>2026-10-08T10:00:00Z</updated>
+    <link rel="alternate" type="text/html" href="https://example.org/tool/releases/tag/v1.2.0"/>
+    <title>v1.2.0</title>
+  </entry>
+  <entry>
+    <id>tag:example.org,2026:Release/2</id>
+    <updated>2026-10-01T10:00:00Z</updated>
+    <link rel="self" href="https://example.org/api/2"/>
+    <link rel="alternate" type="text/html" href="https://example.org/tool/releases/tag/v1.1.0"/>
+    <title type="html">v1.1.0 &lt;beta&gt;</title>
+  </entry>
+</feed>
