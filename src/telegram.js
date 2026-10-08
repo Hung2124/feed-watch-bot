@@ -16,10 +16,12 @@ export function formatMessage(feedTitle, item) {
  * Send one message. Retries once after Telegram's retry_after on HTTP 429.
  * @param fetchImpl injectable fetch for tests
  */
-export async function sendMessage({ token, chatId, text, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) }) {
+export const DEFAULT_API_BASE = "https://api.telegram.org";
+
+export async function sendMessage({ token, chatId, text, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), apiBase = DEFAULT_API_BASE, previews = true }) {
   if (!token || !chatId) throw new Error("TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (wrangler secret put ...)");
-  const url = `https://api.telegram.org/bot${token}/sendMessage`;
-  const body = JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", link_preview_options: { is_disabled: false } });
+  const url = `${apiBase}/bot${token}/sendMessage`;
+  const body = JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", link_preview_options: { is_disabled: !previews } });
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetchImpl(url, { method: "POST", headers: { "content-type": "application/json" }, body });
     if (res.ok) return true;
@@ -36,4 +38,19 @@ export async function sendMessage({ token, chatId, text, fetchImpl = fetch, slee
     throw new Error(`Telegram sendMessage failed: HTTP ${res.status} ${info.description || ""}`.trim());
   }
   return false;
+}
+
+/** Call any Bot API method (used by /setup for setWebhook and setMyCommands). Never logs the token. */
+export async function callApi({ token, method, payload, fetchImpl = fetch, apiBase = DEFAULT_API_BASE }) {
+  const res = await fetchImpl(`${apiBase}/bot${token}/${method}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  let info = {};
+  try {
+    info = await res.json();
+  } catch {}
+  if (!res.ok || info.ok === false) throw new Error(`Telegram ${method} failed: HTTP ${res.status} ${info.description || ""}`.trim());
+  return info.result;
 }

@@ -26,10 +26,13 @@ MAX_ITEMS_PER_FEED = "5"
 POST_ON_FIRST_RUN = "false"
 # Pause between Telegram messages (Telegram allows about 1 message per second per chat).
 SEND_DELAY_MS = "1100"
+# Max feeds a chat can add with /watch (fixed FEEDS above do not count).
+MAX_FEEDS_PER_CHAT = "10"
 
 # Secrets are NOT stored in this file. Set them with:
 #   npx wrangler secret put TELEGRAM_BOT_TOKEN
 #   npx wrangler secret put TELEGRAM_CHAT_ID
+#   npx wrangler secret put TELEGRAM_WEBHOOK_SECRET   # random string; also used for /setup
 # For local `npm run dev`, copy .dev.vars.example to .dev.vars (git-ignored).
 
 [observability]

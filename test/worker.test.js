@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import worker, { runOnce } from "../src/index.js";
+import worker from "../src/index.js";
+import { runOnce } from "../src/app.js";
 import { escapeHtml, formatMessage, sendMessage } from "../src/telegram.js";
 import { fakeFetch, fixture, MemoryKV } from "./helpers.js";
 
@@ -98,7 +99,14 @@ test("message formatting escapes HTML", () => {
 test("fetch handler is a health check only", async () => {
   const res = await worker.fetch(new Request("https://bot.example/"), { FEEDS: `${RSS},${ATOM}` });
   assert.equal(res.status, 200);
-  assert.match(await res.text(), /Watching 2 feed/);
+  assert.match(await res.text(), /Watching 2 fixed feed/);
   const res404 = await worker.fetch(new Request("https://bot.example/run"), {});
   assert.equal(res404.status, 404);
+});
+
+test("the Worker entry module exports only the default handler (workerd rejects other exports)", async () => {
+  const mod = await import("../src/index.js");
+  assert.deepEqual(Object.keys(mod), ["default"]);
+  assert.equal(typeof mod.default.fetch, "function");
+  assert.equal(typeof mod.default.scheduled, "function");
 });

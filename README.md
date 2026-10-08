@@ -2,36 +2,37 @@
 
 A tiny **Telegram alert bot that runs on Cloudflare Workers**. No server to rent, nothing to keep online.
 
-Every 15 minutes a **Cron Trigger** checks your RSS / Atom feeds, remembers what it has
-already seen in **Workers KV**, and posts each new item to your **Telegram** chat, group or channel.
+Every 15 minutes a **Cron Trigger** checks your RSS / Atom feeds (fixed list + feeds you add
+with `/watch`), remembers what it has already seen in **Workers KV**, and posts each new item
+to your **Telegram** chat. Chat commands arrive through a **webhook**.
+
+![Local demo: simulated Telegram updates through the real Worker](docs/demo.gif)
+
+*LOCAL DEMO (not a real Telegram screen). Simulated webhook updates hit `wrangler dev`;
+the replies are captured by a local mock of the Telegram Bot API. Recording:
+[`docs/demo.cast`](docs/demo.cast), script: `scripts/local-demo/`.*
 
 ```
- Cron Trigger (every 15 min)
-        │
-        ▼
- ┌───────────────┐   fetch    ┌──────────────────────┐
- │  Worker       │──────────▶│ RSS / Atom feeds      │
- │  src/index.js │            └──────────────────────┘
- │               │  seen ids  ┌──────────────────────┐
- │               │◀─────────▶│ Workers KV (SEEN)     │
- │               │            └──────────────────────┘
- │               │ sendMessage┌──────────────────────┐
- │               │──────────▶│ Telegram Bot API      │──▶ your chat
- └───────────────┘            └──────────────────────┘
+ Telegram chat ──webhook──▶ Worker ──▶ Workers KV (feeds + seen ids)
+                               │
+ Cron Trigger (every 15 min) ──┘──▶ RSS/Atom feeds ──▶ Telegram sendMessage
 ```
 
 ## Features
 
-- Watches any number of **RSS 2.0, RSS 1.0 (RDF) and Atom** feeds (set in `wrangler.toml`).
-- **No duplicates:** seen item ids are stored per feed in Workers KV (one key per feed, capped list),
-  and KV is only written when something changed.
-- **No flood on day one:** the first check of a feed just remembers the existing items
-  (`POST_ON_FIRST_RUN = "false"`), then only genuinely new items are posted.
-- Posts **oldest first**, at most `MAX_ITEMS_PER_FEED` per feed per run, with a pause between
-  messages to respect Telegram's rate limits; retries once on HTTP 429.
-- A broken feed is logged and skipped; the other feeds still run. If Telegram fails halfway,
-  items that were already delivered are not sent again.
-- **Secrets stay secret:** the bot token and chat id are Wrangler secrets, never in the code or in logs.
+- Chat commands: `/watch <url>`, `/list`, `/remove <id>`, `/rate USD EUR`, `/help`.
+- Watches **RSS 2.0, RSS 1.0 (RDF) and Atom** feeds: a fixed list in `wrangler.toml` plus feeds
+  added with `/watch` (stored per chat in KV, max `MAX_FEEDS_PER_CHAT`).
+- **Only your chat** is answered (`TELEGRAM_CHAT_ID`). The webhook secret is checked on every update.
+- `/watch` validates the URL (http(s) only, no credentials, no private/local hosts, size + timeout
+  capped) and marks existing items as seen, so only items published from now on are posted.
+- `/rate` uses the public [Frankfurter](https://www.frankfurter.app/) API (ECB reference rates).
+- **No duplicates:** seen ids are stored per feed in KV; KV is only written when something changed.
+- Posts oldest first, at most `MAX_ITEMS_PER_FEED` per feed per run, with a pause between messages;
+  retries once on HTTP 429. A broken feed is skipped; a mid-run Telegram failure keeps the
+  items that were already delivered.
+- **Secrets stay secret:** token, chat id and webhook secret are Wrangler secrets, never in the
+  code or in logs.
 - Offline unit tests with Node's built-in test runner (`npm test`), no network needed.
 
 ## What you need
@@ -96,35 +97,45 @@ Optional settings: `MAX_ITEMS_PER_FEED`, `POST_ON_FIRST_RUN`, `SEND_DELAY_MS`, a
 ### 6. Add your secrets
 
 ```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN    # paste the BotFather token when asked
-npx wrangler secret put TELEGRAM_CHAT_ID      # paste the chat id
+npx wrangler secret put TELEGRAM_BOT_TOKEN       # BotFather token
+npx wrangler secret put TELEGRAM_CHAT_ID         # your chat / group / channel id
+npx wrangler secret put TELEGRAM_WEBHOOK_SECRET  # any long random string you invent
 ```
 
 They are stored encrypted in your Cloudflare account. You can also add them in the dashboard
 under *Workers & Pages → feed-watch-bot → Settings → Variables and Secrets* (type **Secret**).
 
-### 7. Deploy
+### 7. Deploy and register the webhook
 
 ```bash
 npx wrangler deploy
+# Register the webhook + the command menu. Uses the Worker URL from the deploy output:
+curl -X POST "https://feed-watch-bot.<your-subdomain>.workers.dev/setup" \
+  -H "X-Setup-Key: <same TELEGRAM_WEBHOOK_SECRET>"
 ```
 
-That's it. The Worker URL shows a short health message, and the cron runs every 15 minutes.
-Watch live logs with:
+That's it. Open your bot in Telegram and try `/watch https://github.com/cloudflare/workers-sdk/releases.atom`.
+The cron runs every 15 minutes. Watch live logs with `npx wrangler tail`.
 
-```bash
-npx wrangler tail
-```
-
-The first run only records existing items. Wait for a new item in one of your feeds, or set
-`POST_ON_FIRST_RUN = "true"` once if you want to see messages immediately.
+The first check of a feed only records existing items. Wait for a new item, or set
+`POST_ON_FIRST_RUN = "true"` once if you want messages immediately.
 
 ## Test locally
 
 ```bash
-cp .dev.vars.example .dev.vars        # put a TEST bot token and chat id here (git-ignored)
+cp .dev.vars.example .dev.vars        # put a TEST bot token, chat id and webhook secret (git-ignored)
 npm run dev                           # wrangler dev --test-scheduled
-curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"   # trigger one run
+curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"   # trigger one cron run
+```
+
+**Local demo without a real bot** (what the GIF above shows): a mock Telegram API + simulated
+webhook updates exercise the real Worker code and local KV.
+
+```bash
+scripts/local-demo/start.sh           # mock on :8788 + wrangler dev on :8799
+scripts/local-demo/send.sh "/help"    # simulated Telegram message
+scripts/local-demo/steps.sh           # the full recorded sequence
+scripts/local-demo/stop.sh
 ```
 
 ## Configuration reference
@@ -132,12 +143,14 @@ curl "http://localhost:8787/__scheduled?cron=*/15+*+*+*+*"   # trigger one run
 | Name | Where | Default | Meaning |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | secret | (required) | Token from @BotFather |
-| `TELEGRAM_CHAT_ID` | secret | (required) | Chat, group or channel id |
-| `FEEDS` | `[vars]` | one example feed | Feed URLs, one per line (commas also work) |
+| `TELEGRAM_CHAT_ID` | secret | (required) | Chat, group or channel answered by the bot |
+| `TELEGRAM_WEBHOOK_SECRET` | secret | (required) | Random string; Telegram header + `/setup` key |
+| `FEEDS` | `[vars]` | one example feed | Fixed feed URLs, one per line (commas also work) |
 | `MAX_ITEMS_PER_FEED` | `[vars]` | `5` | Max new items posted per feed per run |
-| `POST_ON_FIRST_RUN` | `[vars]` | `false` | Post existing items on the first check |
+| `MAX_FEEDS_PER_CHAT` | `[vars]` | `10` | Max feeds a chat may add with `/watch` |
+| `POST_ON_FIRST_RUN` | `[vars]` | `false` | Post existing items on the first check of a feed |
 | `SEND_DELAY_MS` | `[vars]` | `1100` | Pause between Telegram messages |
-| `SEEN` | KV binding | (required) | Stores seen item ids |
+| `SEEN` | KV binding | (required) | Seen item ids + per-chat watch lists |
 | `crons` | `[triggers]` | `*/15 * * * *` | Schedule (UTC) |
 
 ## Free plan notes
@@ -151,10 +164,15 @@ running more often.
 ## Project layout
 
 ```
-src/index.js      cron handler (runOnce) + health-check fetch handler
-src/feed.js       RSS / Atom / RDF parsing (fast-xml-parser)
+src/index.js      Worker entry (default export only: fetch + scheduled)
+src/app.js        webhook, /setup, cron runOnce
+src/commands.js   /watch /list /remove /rate /help
+src/store.js      per-chat watch lists in KV
+src/validate.js   feed URL + currency validation
+src/feed.js       RSS / Atom / RDF parsing + download
 src/dedupe.js     KV "seen" bookkeeping and new-item selection
-src/telegram.js   sendMessage with HTML escaping and 429 retry
+src/telegram.js   sendMessage / setWebhook with HTML escaping and 429 retry
+scripts/local-demo/  local demo without a real Telegram bot
 test/             node:test unit tests + XML fixtures
 wrangler.toml     Worker name, cron, KV binding, feed list
 ```
@@ -163,7 +181,7 @@ wrangler.toml     Worker name, cron, KV binding, feed list
 
 - Sends to **Telegram only**.
 - Runs on **your own** Cloudflare account with **your own** bot token; the developer never needs
-  your password or token.
+  your password or token. You create the Cloudflare account and the BotFather token yourself.
 - Bug fixes for 7 days after delivery are included in the gig. Maintenance after that is not included
   (available as a separate order).
 

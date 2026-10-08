@@ -108,3 +108,21 @@ export function parseFeedList(value) {
     .filter((s) => /^https?:\/\//i.test(s));
   return [...new Set(urls)];
 }
+
+const UA = "feed-watch-bot/1.0 (+https://developers.cloudflare.com/workers/)";
+export const MAX_FEED_BYTES = 2_000_000;
+
+/** Download and parse a feed with a timeout and a size cap. */
+export async function fetchFeed(url, { fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+  const res = await fetchImpl(url, {
+    headers: { "user-agent": UA, accept: "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.5" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const declared = Number(res.headers.get("content-length") || 0);
+  if (declared > MAX_FEED_BYTES) throw new Error("feed is too large");
+  const body = await res.text();
+  if (body.length > MAX_FEED_BYTES) throw new Error("feed is too large");
+  return parseFeed(body);
+}
